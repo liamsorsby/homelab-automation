@@ -1,0 +1,293 @@
+---
+- name: Setup Kuberentes control plain
+  hosts: k8s
+  become: true
+  vars_files:
+    - vars/main.yaml
+  vars:
+    istio_version: 1.21.2
+    metallb_version: v0.14.5
+    metrics_server_version: 3.12.1
+    argocd_version: 6.7.17
+    prometheus_version: 58.2.2
+    cert_manager_version: 1.14.5
+    snmp_exporter_version: 5.3.0
+    virtual_services:
+      - "argocd-vs.yaml"
+      - "grafana-vs.yaml"
+      - "prometheus-vs.yaml"
+      - "alertmanager-vs.yaml"
+    helm_charts:
+      - { chart: "https://istio-release.storage.googleapis.com/charts", name: "istio"}
+      - { chart: "https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts", name: "csi-driver-nfs"}
+      - { chart: "https://metallb.github.io/metallb", name: "metallb"}
+      - { chart: "https://kubernetes-sigs.github.io/metrics-server/", name: "metrics-server"}
+      - { chart: "https://argoproj.github.io/argo-helm", name: "argo"}
+      - { chart: "https://prometheus-community.github.io/helm-charts", name: "prometheus-community"}
+      - { chart: "https://charts.jetstack.io", name: "jetstack"}
+  roles:
+    - role: geerlingguy.containerd
+      tags: [ 'docker' ]
+    - role: geerlingguy.kubernetes
+      tags: ['kubernetes']
+  tasks:
+    - name: copy kubelet config
+      when: inventory_hostname in groups['k8sworker']
+      copy:
+        src: /etc/kubernetes/kubelet.conf
+        dest: /etc/kubernetes/admin.conf
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+    - name:
+      when: inventory_hostname in groups['k8sworker']
+      lineinfile:
+        path: /root/.bashrc
+        line: "export KUBECONFIG=/etc/kubernetes/admin.conf"
+
+    # Add cluster dependencies
+    - name: Install helm if not exists
+      unarchive:
+        src: https://get.helm.sh/helm-v3.14.4-linux-amd64.tar.gz
+        dest: /usr/local/bin
+        extra_opts: "--strip-components=1"
+        owner: root
+        group: root
+        mode: 0755
+        remote_src: true
+      args:
+        creates: /usr/local/bin/helm
+
+    - name: install helm charts
+      kubernetes.core.helm_repository:
+        name: "{{ item.name }}"
+        repo_url: "{{ item.chart }}"
+        force_update: true
+      loop: "{{ helm_charts }}"
+
+    - name: Install NFS driver
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.helm:
+        name: csi-driver-nfs
+        chart_ref: csi-driver-nfs/csi-driver-nfs
+        release_namespace: kube-system
+        chart_version: v4.6.0
+        wait: true
+
+    - name: Mount NFS for CSI driver
+      mount:
+        fstype: nfs4
+        src: 192.168.7.92:/volume1/K8s
+        path: "/mnt/shared_data"
+        opts: rw,sync
+        state: mounted
+
+    # This is required for installing the storage class
+    - name: install pre-requisites for ansible
+      pip:
+        name:
+          - kubernetes
+
+    - name: Apply NFS storage class
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'nfs_storage_class.yaml') | from_yaml }}"
+
+    - name: Apply local storage class
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'local_storage_class.yaml') | from_yaml }}"
+
+    - name: Install metallb
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.helm:
+        name: metallb
+        chart_ref: metallb/metallb
+        release_namespace: metallb-system
+        create_namespace: true
+        chart_version: "{{ metallb_version }}"
+        wait: true
+
+    - name: Apply IP Address Pool
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'ipaddresspool.yaml') | from_yaml }}"
+
+    - name: Apply L2 Advertisement
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'l2advertisement.yaml') | from_yaml }}"
+
+    - name: Install metrics server
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.helm:
+        name: metrics-server
+        chart_ref: metrics-server/metrics-server
+        release_namespace: monitoring-system
+        create_namespace: true
+        chart_version: "{{ metrics_server_version }}"
+        wait: true
+        set_values:
+          - value: "args={--kubelet-insecure-tls}"
+
+    - name: Download istioctl and unarchive
+      unarchive:
+        src: "https://github.com/istio/istio/releases/download/1.21.2/istio-1.21.2-linux-amd64.tar.gz"
+        remote_src: yes
+        dest: "/tmp"
+        mode: '0755'
+
+    - name: Copy istioctl to /usr/bin
+      copy:
+        src: /tmp/istio-1.21.2/bin/istioctl
+        dest: /usr/bin/istioctl
+        remote_src: true
+        owner: root
+        group: ubuntu
+        mode: '0755'
+
+    - name: remove tmp files
+      command: "rm -rf /tmp/istio-1.21.2"
+
+    - name: Install Istio base
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.helm:
+        name: istiod
+        chart_ref: istio/base
+        release_namespace: istio-system
+        create_namespace: true
+        chart_version: "{{ istio_version }}"
+        wait: true
+        set_values:
+          - value: defaultRevision=default
+
+    - name: Install Istiod
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.helm:
+        name: istiod
+        chart_ref: istio/istiod
+        release_namespace: istio-system
+        create_namespace: true
+        chart_version: "{{ istio_version }}"
+        wait: true
+
+    # this will likely fail if you don't have an external node ip address
+    - name: Install Istio ingress
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.helm:
+        name: istio-ingress
+        chart_ref: istio/gateway
+        release_namespace: istio-system
+        create_namespace: true
+        chart_version: "{{ istio_version }}"
+        wait: true
+        set_values:
+          - value: service.externalTrafficPolicy=Cluster
+
+    - name: Apply gateway
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'gateway.yaml') | from_yaml }}"
+
+    - name: Install argocd
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.helm:
+        name: argocd
+        chart_ref: argo/argo-cd
+        release_namespace: argocd
+        create_namespace: true
+        chart_version: "{{ argocd_version }}"
+        wait: true
+        values: "{{ lookup('file', 'values/argocd.yaml') | from_yaml }}"
+
+    - name: Add virtual service
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'argocd-vs.yaml') | from_yaml }}"
+
+    - name: Apply DR
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'dr.yaml') | from_yaml }}"
+
+    - name: Label argocd namespace
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      command: "sudo kubectl label namespace argocd istio-injection=enabled --overwrite"
+
+    - name: install prometheus operator
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.helm:
+        name: prometheus-community
+        chart_ref: prometheus-community/kube-prometheus-stack
+        release_namespace: monitoring
+        create_namespace: true
+        chart_version: "{{ prometheus_version }}"
+        wait: true
+        values: "{{ lookup('file', 'values/prometheus.yaml') | from_yaml }}"
+
+    - name: apply vs for grafana
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'grafana-vs.yaml') | from_yaml }}"
+
+    - name: apply vs for alert manager
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'alertmanager-vs.yaml') | from_yaml }}"
+
+    - name: apply vs for prometheus
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'prometheus-vs.yaml') | from_yaml }}"
+
+    - name: Label monitoring namespace
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      command: "sudo kubectl label namespace monitoring istio-injection=enabled --overwrite"
+
+    - name: install cert manager
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.helm:
+        name: certmanager
+        chart_ref: jetstack/cert-manager
+        release_namespace: cert-manager
+        create_namespace: true
+        chart_version: "{{ cert_manager_version }}"
+        wait: true
+        values:
+          installCRDs: true
+          extraArgs: [ '--dns01-recursive-nameservers-only','--dns01-recursive-nameservers=8.8.8.8:53,1.1.1.1:53' ] # forces cert manager to use external DNS not local DNS
+
+    - name: apply secrets for cert manager
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'certmanager/cloudflare-api-token.yaml') | from_yaml }}"
+
+    - name: apply staging cluster issuer cert manager
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'certmanager/ClusterIssuerStaging.yaml') | from_yaml }}"
+
+    - name: apply production cluster issuer cert manager
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'certmanager/ClusterIssuerProduction.yaml') | from_yaml }}"
+
+    - name: apply ingress certificate
+      when: inventory_hostname == groups['k8smaster'][0] # ensure this is only installed on a single worker
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'ingress-cert.yaml') | from_yaml }}"

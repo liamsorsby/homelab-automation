@@ -1,0 +1,23 @@
+[k8smaster]
+k8smaster01 ansible_host=192.168.7.6 kubernetes_role=control_plane
+
+[k8sworker]
+k8sworker01 ansible_host=192.168.7.7 kubernetes_role=node
+k8sworker02 ansible_host=192.168.7.8 kubernetes_role=node
+k8sworker03 ansible_host=192.168.7.9 kubernetes_role=node
+k8sworker04 ansible_host=192.168.7.10 kubernetes_role=node
+
+[k8s:children]
+k8smaster
+k8sworker
+
+[dnsmaster]
+dnsmaster01 ansible_host=192.168.7.11
+
+[dnsslave]
+dnsslave01 ansible_host=192.168.7.12
+dnsslave02 ansible_host=192.168.7.13
+
+[dns:children]
+dnsmaster
+dnsslave

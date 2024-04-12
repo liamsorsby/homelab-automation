@@ -1,0 +1,14 @@
+bind9_authoritative: yes
+bind9_zones_static:
+  - { name: lab.sorsby.co , type=master }
+bind9_forward: yes
+bind9_forward_servers:
+  - 1.1.1.1
+  - 8.8.8.8
+  - 4.4.4.4
+bind9_slaves: # this is the list that are allowed to query, localhost is already permitted
+  - "192.168.7.12"
+  - "192.168.7.13"
+bind9_our_neighbors: # this list allows zone transfers
+  - "192.168.7.12"
+  - "192.168.7.13"

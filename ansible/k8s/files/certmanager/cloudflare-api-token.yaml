@@ -1,0 +1,7 @@
+kind: Secret
+apiVersion: v1
+metadata:
+  name: cloudflare-api-token-secret
+  namespace: cert-manager
+data:
+  api-key: <replace-me>

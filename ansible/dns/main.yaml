@@ -1,0 +1,7 @@
+---
+- name: Setup DNS
+  hosts: dns
+  become: true
+  roles:
+    - role: systemli.bind9
+      tags: [ 'dns' ]

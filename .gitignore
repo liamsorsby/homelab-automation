@@ -1,0 +1,9 @@
+# IDE
+.idea
+*.iml
+
+# packer
+secrets.auto.pkrvars.hcl
+
+# secrets
+.ssh

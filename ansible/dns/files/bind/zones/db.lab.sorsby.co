@@ -1,0 +1,37 @@
+; BIND db file for lab.sorsby.co
+
+$TTL 600
+
+@       IN      SOA     ns1.lab.sorsby.co.      liam.sorsby.co. (
+                        2024043001	    ; serial number YYMMDDNN (This needs incrementing for each change to ensure that the master pushes the changes to the slave nodes)
+                        28800           ; Refresh
+                        7200            ; Retry
+                        864000          ; Expire
+                        86400           ; Min TTL
+			)
+
+                NS      ns1.lab.sorsby.co.
+                NS      ns2.lab.sorsby.co.
+
+k8smaster01     IN      A       192.168.7.6
+k8sworker01     IN      A       192.168.7.7
+k8sworker02     IN      A       192.168.7.8
+k8sworker03     IN      A       192.168.7.9
+k8sworker04     IN      A       192.168.7.10
+dnsmaster01     IN      A       192.168.7.11
+dnsslave01      IN      A       192.168.7.12
+ns1             IN      A       192.168.7.12
+dnsslave02      IN      A       192.168.7.13
+ns2             IN      A       192.168.7.13
+pve2            IN      A       192.168.7.113
+pve2            IN      A       192.168.7.114
+pve1            IN      A       192.168.7.115
+pve1            IN      A       192.168.7.116
+argocd          IN      A       192.168.7.241
+grafana         IN      A       192.168.7.241
+alertmanager    IN      A       192.168.7.241
+prometheus      IN      A       192.168.7.241
+
+
+
+$ORIGIN lab.sorsby.co.

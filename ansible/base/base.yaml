@@ -1,0 +1,105 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: Update and upgrade apt packages
+      become: yes
+      ignore_errors: yes
+      failed_when: "'FAILED' in command_result.stderr"
+      ansible.builtin.apt:
+        upgrade: "full"
+        update_cache: yes
+        autoclean: true
+        cache_valid_time: 86400 #One day
+
+    - name: Make sure we have a 'wheel' group
+      group:
+        name: wheel
+        state: present
+
+    - name: Allow 'wheel' group to have passwordless sudo
+      lineinfile:
+        dest: /etc/sudoers
+        state: present
+        regexp: '^%wheel'
+        line: '%wheel ALL=(ALL) NOPASSWD: ALL'
+        validate: 'visudo -cf %s'
+
+    - name: Add sudoers users to wheel group
+      user:
+        name: sorsbyl
+        groups: wheel
+        append: yes
+        state: present
+        createhome: yes
+        shell: /bin/bash
+
+    - name: Create necessary folders
+      file:
+        path: "{{ item }}"
+        recurse: yes
+        state: directory
+      with_items:
+        - /home/sorsbyl/.ssh/
+
+    - name: Copy Secured SSHD Configuration
+      copy: src=sshd_config_secured dest=/etc/ssh/sshd_config owner=root group=root mode=0644
+      #sudo: yes
+
+    - name: SSHD Restart
+      service: name=sshd state=restarted enabled=yes
+      #sudo: yes
+
+    - name: Copy keys and profiles
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: sorsbyl
+        group: sorsbyl
+        mode: 0400
+      with_items:
+        - { src: 'authorized_keys', dest: '/home/sorsbyl/.ssh/authorized_keys' }
+
+    - name: Test Reacheability
+      ansible.builtin.ping:
+
+    - name: Install Qemu-Guest-Agent
+      ansible.builtin.apt:
+        name:
+          - qemu-guest-agent
+          - nfs-common
+          - python3-pip
+        state: present
+
+    - name: Add the br_netfilter module
+      community.general.modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Let iptables see bridged traffic.
+      sysctl:
+        name: "net.ipv4.ip_forward"
+        value: '1'
+        state: present
+
+    - name: Disable Swap
+      command: "swapoff -a"
+
+    - name: Reload sysctl config
+      command: sysctl -p /etc/sysctl.conf
+
+    ## These have been added to ensure that the background upgrade doesn't lock apt for other processes.
+    - name: wait until apt lock is released
+      shell: lsof -w /var/lib/apt/lists/lock | wc -l
+      register: lock
+      until: lock.stdout == "0"
+      retries: 10
+      delay: 10
+
+    ## These have been added to ensure that the background upgrade doesn't lock apt for other processes.
+    - name: wait until apt lock_frontend is released
+      shell: lsof -w /var/lib/dpkg/lock-frontend | wc -l
+      register: lock_frontend
+      until: lock_frontend.stdout == "0"
+      retries: 10
+      delay: 10
