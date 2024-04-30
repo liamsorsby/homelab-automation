@@ -8,7 +8,7 @@
     istio_version: 1.21.2
     metallb_version: v0.14.5
     metrics_server_version: 3.12.1
-    argocd_version: 6.7.17
+    argocd_version: 6.7.18
     prometheus_version: 58.2.2
     cert_manager_version: 1.14.5
     snmp_exporter_version: 5.3.0
