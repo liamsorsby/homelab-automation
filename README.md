@@ -5,7 +5,7 @@ The idea was to get something up and working with argocd so that we can start de
 
 ### Notes
 
-* packer config doesn't quite work yet, currently used the below script to create a VM template for use with terraform until packer is fixed.
+* Currently using the below script to create a VM template for use with terraform until I work out packer.
 
 ### Template created with the following script
 
