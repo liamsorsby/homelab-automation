@@ -1,6 +1,3 @@
-redis-ha:
-  enabled: true
-
 controller:
   extraArgs:
   - --application-namespaces="*"
