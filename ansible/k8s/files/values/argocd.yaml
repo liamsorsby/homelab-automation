@@ -1,3 +1,37 @@
 configs:
   params:
     server.insecure: true
+controller:
+  extraArgs:
+  - --application-namespaces="*"
+server:
+  extraArgs:
+  - --application-namespaces="*"
+root@k8smaster01:~# vim /tmp/argocd.yaml
+root@k8smaster01:~# cat /tmp/argocd.yaml
+redis-ha:
+  enabled: true
+
+controller:
+  extraArgs:
+  - --application-namespaces="*"
+  replicas: 1
+
+server:
+  extraArgs:
+  - --application-namespaces="*"
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+
+repoServer:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+
+applicationSet:
+  replicas: 2
+
+configs:
+  params:
+    server.insecure: true
